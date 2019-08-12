@@ -576,6 +576,15 @@ bool AudioPlaySdWav::isPlaying(void)
 	return (s < 8);
 }
 
+
+bool AudioPlaySdWav::isStopped()
+{
+    // when first loading (i.e. reading file headers), isPlaying and isStopped both return false
+    uint8_t s = *(volatile uint8_t *)&state;
+    return s == STATE_STOP;
+}
+
+
 uint32_t AudioPlaySdWav::positionMillis(void)
 {
 	uint8_t s = *(volatile uint8_t *)&state;

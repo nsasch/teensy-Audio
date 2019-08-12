@@ -39,6 +39,7 @@ public:
 	bool play(const char *filename);
 	void stop(void);
 	bool isPlaying(void);
+        bool isStopped(void);
 	uint32_t positionMillis(void);
 	uint32_t lengthMillis(void);
 	virtual void update(void);

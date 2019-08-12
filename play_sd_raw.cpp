@@ -33,14 +33,44 @@
 void AudioPlaySdRaw::begin(void)
 {
 	playing = false;
+        should_loop = false;
+        keep_preload = false;
 	file_offset = 0;
 	file_size = 0;
 }
 
 
-bool AudioPlaySdRaw::play(const char *filename)
-{
+bool AudioPlaySdRaw::preload(const char *filename, const bool keep_preload) {
+    if (!loadFile(filename)) {
+        return false;
+    }
+    this->keep_preload = keep_preload;
+    return true;
+}
+
+void AudioPlaySdRaw::closeFile(bool force_cleanup) {
+    // force_cleanup ignores the keep_preload flag
+    if (keep_preload && !force_cleanup) {
+        resetFile();
+    } else {
+        if (rawfile) {
+            rawfile.close();
+        }
+        #if defined(HAS_KINETIS_SDHC)
+                if (!(SIM_SCGC3 & SIM_SCGC3_SDHC)) AudioStopUsingSPI();
+        #else
+                AudioStopUsingSPI();
+        #endif
+    }
+}
+
+bool AudioPlaySdRaw::loadFile(const char *filename) {
 	stop();
+
+        if (keep_preload) {
+            closeFile(true);
+        }
+
 #if defined(HAS_KINETIS_SDHC)
 	if (!(SIM_SCGC3 & SIM_SCGC3_SDHC)) AudioStartUsingSPI();
 #else
@@ -64,27 +94,49 @@ bool AudioPlaySdRaw::play(const char *filename)
 	file_size = rawfile.size();
 	file_offset = 0;
 	//Serial.println("able to open file");
-	playing = true;
 	return true;
 }
 
-void AudioPlaySdRaw::stop(void)
+bool AudioPlaySdRaw::play(const char *filename, const bool should_loop)
+{
+    if (!loadFile(filename)) {
+        return false;
+    }
+    this->keep_preload = false;
+
+    return play(should_loop);
+}
+
+bool AudioPlaySdRaw::play(const bool should_loop)
+{
+    if (!rawfile) {
+        // a file must be preloaded
+        return false;
+    }
+    playing = true;
+    this->should_loop = should_loop;
+    return true;
+}
+
+void AudioPlaySdRaw::stop()
 {
 	__disable_irq();
 	if (playing) {
 		playing = false;
 		__enable_irq();
-		rawfile.close();
-		#if defined(HAS_KINETIS_SDHC)
-			if (!(SIM_SCGC3 & SIM_SCGC3_SDHC)) AudioStopUsingSPI();
-		#else
-			AudioStopUsingSPI();
-		#endif
+                closeFile();
 	} else {
 		__enable_irq();
 	}
 }
 
+bool AudioPlaySdRaw::resetFile() {
+    if (!rawfile.seek(0)) {
+        return false;
+    }
+    file_offset = 0;
+    return true;
+}
 
 void AudioPlaySdRaw::update(void)
 {
@@ -98,7 +150,7 @@ void AudioPlaySdRaw::update(void)
 	block = allocate();
 	if (block == NULL) return;
 
-	if (rawfile.available()) {
+	if (rawfile.available() || (should_loop && resetFile() && rawfile.available())) {
 		// we can read more data from the file...
 		n = rawfile.read(block->data, AUDIO_BLOCK_SAMPLES*2);
 		file_offset += n;
@@ -107,13 +159,8 @@ void AudioPlaySdRaw::update(void)
 		}
 		transmit(block);
 	} else {
-		rawfile.close();
-		#if defined(HAS_KINETIS_SDHC)
-			if (!(SIM_SCGC3 & SIM_SCGC3_SDHC)) AudioStopUsingSPI();
-		#else
-			AudioStopUsingSPI();
-		#endif
-		playing = false;
+            closeFile();
+            playing = false;
 	}
 	release(block);
 }
