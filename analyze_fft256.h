@@ -86,6 +86,23 @@ public:
 		} while (binFirst <= binLast);
 		return (float)sum * (1.0f / 16384.0f);
 	}
+	float readMax(unsigned int binFirst, unsigned int binLast) {
+		if (binFirst > binLast) {
+			unsigned int tmp = binLast;
+			binLast = binFirst;
+			binFirst = tmp;
+		}
+		if (binFirst > 127) return 0.0;
+		if (binLast > 127) binLast = 127;
+                uint16_t bin_ct = binLast - binFirst + 1;
+		uint16_t max_val = 0;
+		do {
+			if (output[binFirst++] > max_val) {
+                            max_val = output[binFirst-1];
+                        }
+		} while (binFirst <= binLast);
+		return (float)max_val * (1.0 / 16384.0) * bin_ct;
+        }
 	void averageTogether(uint8_t n) {
 #if AUDIO_BLOCK_SAMPLES == 128
 		if (n == 0) n = 1;

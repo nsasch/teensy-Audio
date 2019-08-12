@@ -32,14 +32,57 @@
 void AudioPlaySdRaw::begin(void)
 {
 	playing = false;
+        keep_preload = false;
 	file_offset = 0;
 	file_size = 0;
+        time_since_stopped_ms = 0;
+        buffer_len = 0;
+        buffer_offset = 0;
 }
 
 
-bool AudioPlaySdRaw::play(const char *filename)
-{
+bool AudioPlaySdRaw::preload(const char *filename, const bool keep_preload) {
+    if (!loadFile(filename)) {
+        return false;
+    }
+    this->keep_preload = keep_preload;
+    playing = false;
+    time_since_stopped_ms = 0;
+    return true;
+}
+
+void AudioPlaySdRaw::cleanupFile(bool force_cleanup) {
+    // force_cleanup ignores the keep_preload flag
+    // only call while playing = false or otherwise in a stopped state
+    if (keep_preload && !force_cleanup) {
+        if (!rawfile.seek(0)) {
+            // this should never happen, but if this fails, let's just close the file completely
+            cleanupFile(true);
+            return;
+        }
+        file_offset = 0;
+        buffer_len = 0;
+        buffer_offset = 0;
+    } else {
+        keep_preload = false;
+        if (rawfile) {
+            rawfile.close();
+        }
+        #if defined(HAS_KINETIS_SDHC)
+                if (!(SIM_SCGC3 & SIM_SCGC3_SDHC)) AudioStopUsingSPI();
+        #else
+                AudioStopUsingSPI();
+        #endif
+    }
+}
+
+bool AudioPlaySdRaw::loadFile(const char *filename) {
 	stop();
+
+        if (keep_preload) {
+            cleanupFile(true);
+        }
+
 #if defined(HAS_KINETIS_SDHC)
 	if (!(SIM_SCGC3 & SIM_SCGC3_SDHC)) AudioStartUsingSPI();
 #else
@@ -50,37 +93,59 @@ bool AudioPlaySdRaw::play(const char *filename)
 	__enable_irq();
 	if (!rawfile) {
 		//Serial.println("unable to open file");
-		#if defined(HAS_KINETIS_SDHC)
-			if (!(SIM_SCGC3 & SIM_SCGC3_SDHC)) AudioStopUsingSPI();
-		#else
-			AudioStopUsingSPI();
-		#endif
+                cleanupFile(true);
 		return false;
 	}
 	file_size = rawfile.size();
 	file_offset = 0;
+        buffer_len = 0;
+        buffer_offset = 0;
 	//Serial.println("able to open file");
-	playing = true;
 	return true;
 }
 
-void AudioPlaySdRaw::stop(void)
+bool AudioPlaySdRaw::play(const char *filename, bool half_sample)
+{
+    if (!loadFile(filename)) {
+        return false;
+    }
+
+    return play(half_sample);
+}
+
+bool AudioPlaySdRaw::play(bool half_sample)
+{
+    if (!rawfile) {
+        // a file must be preloaded
+        return false;
+    }
+    this->half_sample = half_sample;
+    playing = true;
+    return true;
+}
+
+void AudioPlaySdRaw::stop()
 {
 	__disable_irq();
 	if (playing) {
 		playing = false;
 		__enable_irq();
-		rawfile.close();
-		#if defined(HAS_KINETIS_SDHC)
-			if (!(SIM_SCGC3 & SIM_SCGC3_SDHC)) AudioStopUsingSPI();
-		#else
-			AudioStopUsingSPI();
-		#endif
+                time_since_stopped_ms = 0;
+                cleanupFile();
 	} else {
 		__enable_irq();
 	}
 }
 
+void copy_half_speed(uint16_t *src, int16_t *dst, int16_t n) {
+    int16_t *end = &dst[AUDIO_BLOCK_SAMPLES];
+    do {
+        *dst = *src;
+        *(dst+1) = *src;
+        dst += 2;
+        src += 1;
+    } while (dst < end);
+}
 
 void AudioPlaySdRaw::update(void)
 {
@@ -94,23 +159,32 @@ void AudioPlaySdRaw::update(void)
 	block = allocate();
 	if (block == NULL) return;
 
-	if (rawfile.available()) {
-		// we can read more data from the file...
-		n = rawfile.read(block->data, AUDIO_BLOCK_SAMPLES*2);
-		file_offset += n;
-		for (i=n/2; i < AUDIO_BLOCK_SAMPLES; i++) {
-			block->data[i] = 0;
-		}
-		transmit(block);
-	} else {
-		rawfile.close();
-		#if defined(HAS_KINETIS_SDHC)
-			if (!(SIM_SCGC3 & SIM_SCGC3_SDHC)) AudioStopUsingSPI();
-		#else
-			AudioStopUsingSPI();
-		#endif
-		playing = false;
-	}
+        if (buffer_offset >= buffer_len) {
+            if (rawfile.available()) {
+                    // we can read more data from the file...
+                    n = rawfile.read(buffer, 512);
+                    buffer_offset = 0;
+                    buffer_len = n / 2;
+                    file_offset += n;
+                    for (i=buffer_len; i < (512 / 2); i++) {
+                            buffer[i] = 0;
+                    }
+            } else {
+                cleanupFile();
+                playing = false;
+                time_since_stopped_ms = 0;
+            }
+        }
+        if (buffer_offset < buffer_len) {
+            if (half_sample) {
+                copy_half_speed(buffer + buffer_offset, block->data, AUDIO_BLOCK_SAMPLES);
+                buffer_offset += AUDIO_BLOCK_SAMPLES / 2;
+            } else {
+                memcpy(block->data, buffer + buffer_offset, AUDIO_BLOCK_SAMPLES*2);
+                buffer_offset += AUDIO_BLOCK_SAMPLES;
+            }
+            transmit(block);
+        }
 	release(block);
 }
 
