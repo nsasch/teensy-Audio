@@ -48,10 +48,10 @@ bool AudioPlaySdRaw::preload(const char *filename, const bool keep_preload) {
     return true;
 }
 
-void AudioPlaySdRaw::closeFile(bool force_cleanup) {
+void AudioPlaySdRaw::cleanupFile(bool force_cleanup) {
     // force_cleanup ignores the keep_preload flag
     if (keep_preload && !force_cleanup) {
-        resetFile();
+        rewindFile();
     } else {
         if (rawfile) {
             rawfile.close();
@@ -68,7 +68,7 @@ bool AudioPlaySdRaw::loadFile(const char *filename) {
 	stop();
 
         if (keep_preload) {
-            closeFile(true);
+            cleanupFile(true);
         }
 
 #if defined(HAS_KINETIS_SDHC)
@@ -84,11 +84,7 @@ bool AudioPlaySdRaw::loadFile(const char *filename) {
 	__set_BASEPRI(last_pri);
 	if (!rawfile) {
 		//Serial.println("unable to open file");
-		#if defined(HAS_KINETIS_SDHC)
-			if (!(SIM_SCGC3 & SIM_SCGC3_SDHC)) AudioStopUsingSPI();
-		#else
-			AudioStopUsingSPI();
-		#endif
+                cleanupFile(true);
 		return false;
 	}
 	file_size = rawfile.size();
@@ -124,13 +120,13 @@ void AudioPlaySdRaw::stop()
 	if (playing) {
 		playing = false;
 		__enable_irq();
-                closeFile();
+                cleanupFile();
 	} else {
 		__enable_irq();
 	}
 }
 
-bool AudioPlaySdRaw::resetFile() {
+bool AudioPlaySdRaw::rewindFile() {
     if (!rawfile.seek(0)) {
         return false;
     }
@@ -150,7 +146,7 @@ void AudioPlaySdRaw::update(void)
 	block = allocate();
 	if (block == NULL) return;
 
-	if (rawfile.available() || (should_loop && resetFile() && rawfile.available())) {
+	if (rawfile.available() || (should_loop && rewindFile() && rawfile.available())) {
 		// we can read more data from the file...
 		n = rawfile.read(block->data, AUDIO_BLOCK_SAMPLES*2);
 		file_offset += n;
@@ -159,7 +155,7 @@ void AudioPlaySdRaw::update(void)
 		}
 		transmit(block);
 	} else {
-            closeFile();
+            cleanupFile();
             playing = false;
 	}
 	release(block);

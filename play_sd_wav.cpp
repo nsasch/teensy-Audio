@@ -48,6 +48,7 @@ void AudioPlaySdWav::begin(void)
 {
 	state = STATE_STOP;
 	state_play = STATE_STOP;
+        pause = false;
 	data_length = 0;
 	if (block_left) {
 		release(block_left);
@@ -60,7 +61,7 @@ void AudioPlaySdWav::begin(void)
 }
 
 
-bool AudioPlaySdWav::play(const char *filename)
+bool AudioPlaySdWav::preload(const char *filename)
 {
 	stop();
 #if defined(HAS_KINETIS_SDHC)	
@@ -88,7 +89,23 @@ bool AudioPlaySdWav::play(const char *filename)
 	data_length = 20;
 	header_offset = 0;
 	state = STATE_PARSE1;
+        pause = true;
 	return true;
+}
+
+bool AudioPlaySdWav::play(const char *filename)
+{
+    if (!preload(filename)) {
+        return false;
+    }
+    pause = false;
+    return true;
+}
+
+bool AudioPlaySdWav::play()
+{
+    pause = false;
+    return true;
 }
 
 void AudioPlaySdWav::stop(void)
@@ -121,6 +138,9 @@ void AudioPlaySdWav::update(void)
 
 	// only update if we're playing
 	if (state == STATE_STOP) return;
+
+        // if we're proessing the audio data in the file, but paused, return
+        if (pause && state < 8) { return; }
 
 	// allocate the audio blocks to transmit
 	block_left = allocate();
@@ -157,6 +177,8 @@ void AudioPlaySdWav::update(void)
 		if (buffer_length == 0) goto end;
 		buffer_offset = 0;
 		bool parsing = (state >= 8);
+                // if we're proessing the audio data in the file, but paused, return
+                if (pause && state < 8) { return; }
 		bool txok = consume(buffer_length);
 		if (txok) {
 			if (state != STATE_STOP) return;
@@ -369,6 +391,7 @@ start:
 
 	  // playing mono at native sample rate
 	  case STATE_DIRECT_16BIT_MONO:
+                if (pause) { return false; }
 		if (size > data_length) size = data_length;
 		data_length -= size;
 		while (1) {
@@ -402,6 +425,7 @@ start:
 
 	  // playing stereo at native sample rate
 	  case STATE_DIRECT_16BIT_STEREO:
+                if (pause) { return false; }
 		if (size > data_length) size = data_length;
 		data_length -= size;
 		if (leftover_bytes) {
@@ -573,7 +597,20 @@ bool AudioPlaySdWav::parse_format(void)
 bool AudioPlaySdWav::isPlaying(void)
 {
 	uint8_t s = *(volatile uint8_t *)&state;
-	return (s < 8);
+	return (s < 8) && !pause;
+}
+
+
+bool AudioPlaySdWav::isPaused(void)
+{
+	uint8_t s = *(volatile uint8_t *)&state;
+	return (s < 8) && pause;
+}
+
+bool AudioPlaySdWav::isLoading(void)
+{
+	uint8_t s = *(volatile uint8_t *)&state;
+	return (s >= 8 && s != STATE_STOP);
 }
 
 

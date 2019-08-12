@@ -41,13 +41,14 @@ public:
         bool play(const bool should_loop=false);
 	void stop();
 	bool isPlaying(void) { return playing; }
+	bool isStopped(void) { return !playing; }
 	uint32_t positionMillis(void);
 	uint32_t lengthMillis(void);
 	virtual void update(void);
 private:
-        void closeFile(const bool force_cleanup=false);
+        void cleanupFile(const bool force_cleanup=false);
 	bool loadFile(const char *filename);
-        bool resetFile(void);
+        bool rewindFile(void);
 	File rawfile;
 	uint32_t file_size;
 	volatile uint32_t file_offset;
