@@ -48,6 +48,7 @@ void AudioPlaySdWav::begin(void)
 {
 	state = STATE_STOP;
 	state_play = STATE_STOP;
+        keep_preload = false;
         pause = false;
 	data_length = 0;
 	if (block_left) {
@@ -61,7 +62,7 @@ void AudioPlaySdWav::begin(void)
 }
 
 
-bool AudioPlaySdWav::preload(const char *filename)
+bool AudioPlaySdWav::loadFile(const char *filename)
 {
 	stop();
 #if defined(HAS_KINETIS_SDHC)	
@@ -93,6 +94,15 @@ bool AudioPlaySdWav::preload(const char *filename)
 	return true;
 }
 
+bool AudioPlaySdWav::preload(const char *filename, const bool keep_preload)
+{
+    if (!loadFile(filename)) {
+        return false;
+    }
+    this->keep_preload = keep_preload;
+    return true;
+}
+
 bool AudioPlaySdWav::play(const char *filename)
 {
     if (!preload(filename)) {
@@ -110,6 +120,7 @@ bool AudioPlaySdWav::play()
 
 void AudioPlaySdWav::stop(void)
 {
+    // TODO reset the file instead of stopping, for keep_preload
 	__disable_irq();
 	if (state != STATE_STOP) {
 		audio_block_t *b1 = block_left;
@@ -190,6 +201,7 @@ void AudioPlaySdWav::update(void)
 		}
 	}
 end:	// end of file reached or other reason to stop
+        // TODO reset the file instead of stopping, for keep_preload
 	wavfile.close();
 #if defined(HAS_KINETIS_SDHC)	
 	if (!(SIM_SCGC3 & SIM_SCGC3_SDHC)) AudioStopUsingSPI();
@@ -408,6 +420,7 @@ start:
 				data_length += size;
 				buffer_offset = p - buffer;
 				if (block_right) release(block_right);
+                                // TODO reset the file instead of stopping, for keep_preload
 				if (data_length == 0) state = STATE_STOP;
 				return true;
 			}
@@ -421,6 +434,7 @@ start:
 		if (block_offset > 0) {
 			// TODO: fill remainder of last block with zero and transmit
 		}
+                // TODO reset the file instead of stopping, for keep_preload
 		state = STATE_STOP;
 		return false;
 
@@ -460,6 +474,7 @@ start:
 				block_right = NULL;
 				data_length += size;
 				buffer_offset = p - buffer;
+                                // TODO reset the file instead of stopping, for keep_preload
 				if (data_length == 0) state = STATE_STOP;
 				return true;
 			}
@@ -473,6 +488,7 @@ start:
 		if (block_offset > 0) {
 			// TODO: fill remainder of last block with zero and transmit
 		}
+                // TODO reset the file instead of stopping, for keep_preload
 		state = STATE_STOP;
 		return false;
 
@@ -501,6 +517,7 @@ start:
 	  //default:
 		//Serial.println("AudioPlaySdWav, unknown state");
 	}
+        // TODO reset the file instead of stopping, for keep_preload
 	state_play = STATE_STOP;
 	state = STATE_STOP;
 	return false;
