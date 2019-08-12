@@ -346,6 +346,7 @@ start:
 				block_right = allocate();
 				if (!block_right) return false;
 			}
+                        audio_offset = wavfile.position() - size;
 			total_length = data_length;
 		} else {
 			state = STATE_PARSE4;
