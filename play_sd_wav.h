@@ -36,9 +36,10 @@ class AudioPlaySdWav : public AudioStream
 public:
 	AudioPlaySdWav(void) : AudioStream(0, NULL), block_left(NULL), block_right(NULL) { begin(); }
 	void begin(void);
-	bool preload(const char *filename);
+	bool loadFile(const char *filename);
+	bool preload(const char *filename, const bool keep_preload);
 	bool play(const char *filename);
-	bool play();
+	bool play(void);
 	void stop(void);
 	bool isPlaying(void);
         bool isPaused(void);
@@ -66,6 +67,7 @@ private:
 	uint8_t state_play;
 	uint8_t leftover_bytes;
         bool pause;
+        bool keep_preload;
 };
 
 #endif

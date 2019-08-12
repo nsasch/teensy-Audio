@@ -105,7 +105,7 @@ bool AudioPlaySdWav::preload(const char *filename, const bool keep_preload)
 
 bool AudioPlaySdWav::play(const char *filename)
 {
-    if (!preload(filename)) {
+    if (!loadFile(filename)) {
         return false;
     }
     pause = false;
@@ -358,7 +358,6 @@ start:
 				block_right = allocate();
 				if (!block_right) return false;
 			}
-                        audio_offset = wavfile.position() - size;
 			total_length = data_length;
 		} else {
 			state = STATE_PARSE4;
