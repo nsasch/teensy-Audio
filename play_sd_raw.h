@@ -37,8 +37,8 @@ public:
 	AudioPlaySdRaw(void) : AudioStream(0, NULL) { begin(); }
 	void begin(void);
 	bool preload(const char *filename, const bool keep_preload);
-	bool play(const char *filename, const bool should_loop=false);
-        bool play(const bool should_loop=false);
+	bool play(const char *filename);
+        bool play();
 	void stop();
 	bool isPlaying(void) { return playing; }
 	bool isStopped(void) { return !playing; }
@@ -48,12 +48,10 @@ public:
 private:
         void cleanupFile(const bool force_cleanup=false);
 	bool loadFile(const char *filename);
-        bool rewindFile(void);
 	File rawfile;
 	uint32_t file_size;
 	volatile uint32_t file_offset;
 	volatile bool playing;
-        bool should_loop;
         bool keep_preload;
 };
 

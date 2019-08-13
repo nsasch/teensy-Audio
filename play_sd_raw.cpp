@@ -33,7 +33,6 @@
 void AudioPlaySdRaw::begin(void)
 {
 	playing = false;
-        should_loop = false;
         keep_preload = false;
 	file_offset = 0;
 	file_size = 0;
@@ -45,14 +44,22 @@ bool AudioPlaySdRaw::preload(const char *filename, const bool keep_preload) {
         return false;
     }
     this->keep_preload = keep_preload;
+    playing = false;
     return true;
 }
 
 void AudioPlaySdRaw::cleanupFile(bool force_cleanup) {
     // force_cleanup ignores the keep_preload flag
+    // only call while playing = false or otherwise in a stopped state
     if (keep_preload && !force_cleanup) {
-        rewindFile();
+        if (!rawfile.seek(0)) {
+            // this should never happen, but if this fails, let's just close the file completely
+            cleanupFile(true);
+            return;
+        }
+        file_offset = 0;
     } else {
+        keep_preload = false;
         if (rawfile) {
             rawfile.close();
         }
@@ -93,24 +100,22 @@ bool AudioPlaySdRaw::loadFile(const char *filename) {
 	return true;
 }
 
-bool AudioPlaySdRaw::play(const char *filename, const bool should_loop)
+bool AudioPlaySdRaw::play(const char *filename)
 {
     if (!loadFile(filename)) {
         return false;
     }
-    this->keep_preload = false;
 
-    return play(should_loop);
+    return play();
 }
 
-bool AudioPlaySdRaw::play(const bool should_loop)
+bool AudioPlaySdRaw::play()
 {
     if (!rawfile) {
         // a file must be preloaded
         return false;
     }
     playing = true;
-    this->should_loop = should_loop;
     return true;
 }
 
@@ -126,14 +131,6 @@ void AudioPlaySdRaw::stop()
 	}
 }
 
-bool AudioPlaySdRaw::rewindFile() {
-    if (!rawfile.seek(0)) {
-        return false;
-    }
-    file_offset = 0;
-    return true;
-}
-
 void AudioPlaySdRaw::update(void)
 {
 	unsigned int i, n;
@@ -146,7 +143,7 @@ void AudioPlaySdRaw::update(void)
 	block = allocate();
 	if (block == NULL) return;
 
-	if (rawfile.available() || (should_loop && rewindFile() && rawfile.available())) {
+	if (rawfile.available()) {
 		// we can read more data from the file...
 		n = rawfile.read(block->data, AUDIO_BLOCK_SAMPLES*2);
 		file_offset += n;

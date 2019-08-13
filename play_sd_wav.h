@@ -52,7 +52,7 @@ private:
 	File wavfile;
 	bool consume(uint32_t size);
 	bool parse_format(void);
-	bool rewindFile(void);
+        void cleanupFile(bool force_cleanup=false);
 	uint32_t header[10];		// temporary storage of wav header data
 	uint32_t data_length;		// number of bytes remaining in current section
 	uint32_t total_length;		// number of audio data bytes in file
@@ -67,8 +67,9 @@ private:
 	uint8_t state;
 	uint8_t state_play;
 	uint8_t leftover_bytes;
-        bool pause;
+
         bool keep_preload;
+        bool playing;
 };
 
 #endif

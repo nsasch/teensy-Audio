@@ -48,9 +48,11 @@ void AudioPlaySdWav::begin(void)
 {
 	state = STATE_STOP;
 	state_play = STATE_STOP;
-        keep_preload = false;
-        pause = false;
 	data_length = 0;
+
+        keep_preload = false;
+        playing = false;
+
 	if (block_left) {
 		release(block_left);
 		block_left = NULL;
@@ -61,18 +63,55 @@ void AudioPlaySdWav::begin(void)
 	}
 }
 
+bool AudioPlaySdWav::preload(const char *filename, const bool keep_preload) {
+    if (!loadFile(filename)) {
+        return false;
+    }
+    this->keep_preload = keep_preload;
+    playing = false;
+    return true;
+}
+
+void AudioPlaySdWav::cleanupFile(bool force_cleanup) {
+    // force_cleanup ignores the keep_preload flag
+    // only call while playing = false or otherwise in a stopped state
+    if (keep_preload && !force_cleanup) {
+        if (state >= 8) {
+            // we're still parsing the file, so there's no need to seek back
+            // let the parsing finish
+            // this function is only called while playing = false, so we're safe
+            return;
+        }
+        if (!wavfile.seek(wavfile.size() - total_length)) {
+            // this should never happen, but if this fails, let's just close the file completely
+            cleanupFile(true);
+            return;
+        }
+        data_length = total_length;
+
+        buffer_length = 0;
+        buffer_offset = 0;
+    } else {
+        keep_preload = false;
+        if (wavfile) {
+            wavfile.close();
+        }
+        #if defined(HAS_KINETIS_SDHC)
+                if (!(SIM_SCGC3 & SIM_SCGC3_SDHC)) AudioStopUsingSPI();
+        #else
+                AudioStopUsingSPI();
+        #endif
+    }
+}
 
 bool AudioPlaySdWav::loadFile(const char *filename)
 {
 	stop();
+
         if (keep_preload) {
-            wavfile.close();
-            #if defined(HAS_KINETIS_SDHC)	
-                    if (!(SIM_SCGC3 & SIM_SCGC3_SDHC)) AudioStopUsingSPI();
-            #else 	
-                    AudioStopUsingSPI();
-            #endif			
+            cleanupFile(true);
         }
+
 #if defined(HAS_KINETIS_SDHC)	
 	if (!(SIM_SCGC3 & SIM_SCGC3_SDHC)) AudioStartUsingSPI();
 #else 	
@@ -85,12 +124,8 @@ bool AudioPlaySdWav::loadFile(const char *filename)
 	wavfile = SD.open(filename);
 	__set_BASEPRI(last_pri);
 	if (!wavfile) {
-	#if defined(HAS_KINETIS_SDHC)	
-		if (!(SIM_SCGC3 & SIM_SCGC3_SDHC)) AudioStopUsingSPI();
-	#else 	
-		AudioStopUsingSPI();
-	#endif			
-		return false;
+            cleanupFile(true);
+            return false;
 	}
 	buffer_length = 0;
 	buffer_offset = 0;
@@ -98,17 +133,7 @@ bool AudioPlaySdWav::loadFile(const char *filename)
 	data_length = 20;
 	header_offset = 0;
 	state = STATE_PARSE1;
-        pause = true;
 	return true;
-}
-
-bool AudioPlaySdWav::preload(const char *filename, const bool keep_preload)
-{
-    if (!loadFile(filename)) {
-        return false;
-    }
-    this->keep_preload = keep_preload;
-    return true;
 }
 
 bool AudioPlaySdWav::play(const char *filename)
@@ -116,56 +141,38 @@ bool AudioPlaySdWav::play(const char *filename)
     if (!loadFile(filename)) {
         return false;
     }
-    pause = false;
-    return true;
+
+    return play();
 }
 
 bool AudioPlaySdWav::play()
 {
-    pause = false;
-    return true;
-}
-
-bool AudioPlaySdWav::rewindFile() {
-    __disable_irq();
-    pause = true;
-    __enable_irq();
-    uint32_t tlength = *(volatile uint32_t *)&total_length;
-    if (!wavfile.seek(wavfile.size() - tlength)) {
+    if (!wavfile) {
         return false;
     }
-    data_length = tlength;
-    buffer_length = 0;
-    buffer_offset = 0;
+    playing = true;
     return true;
 }
 
 void AudioPlaySdWav::stop(void)
 {
-    // TODO reset the file instead of stopping, for keep_preload
-    if (keep_preload) {
-        rewindFile();
-    } else {
 	__disable_irq();
 	if (state != STATE_STOP) {
 		audio_block_t *b1 = block_left;
 		block_left = NULL;
 		audio_block_t *b2 = block_right;
 		block_right = NULL;
-		state = STATE_STOP;
+                playing = false;
+                if (!keep_preload) {
+                    state = STATE_STOP;
+                }
 		__enable_irq();
 		if (b1) release(b1);
 		if (b2) release(b2);
-		wavfile.close();
-	#if defined(HAS_KINETIS_SDHC)	
-		if (!(SIM_SCGC3 & SIM_SCGC3_SDHC)) AudioStopUsingSPI();
-	#else 	
-		AudioStopUsingSPI();
-	#endif	
+                cleanupFile();
 	} else {
 		__enable_irq();
 	}
-    }
 }
 
 
@@ -176,8 +183,8 @@ void AudioPlaySdWav::update(void)
 	// only update if we're playing
 	if (state == STATE_STOP) return;
 
-        // if we're proessing the audio data in the file, but paused, return
-        if (pause && state < 8) { return; }
+        // if we're processing the audio data in the file, but paused, return
+        if (!playing && state < 8) { return; }
 
 	// allocate the audio blocks to transmit
 	block_left = allocate();
@@ -215,29 +222,21 @@ void AudioPlaySdWav::update(void)
 		buffer_offset = 0;
 		bool parsing = (state >= 8);
                 // if we're proessing the audio data in the file, but paused, return
-                if (pause && state < 8) { return; }
+                if (!playing && state < 8) { return; }
 		bool txok = consume(buffer_length);
 		if (txok) {
-			if (state != STATE_STOP) return;
+			if (state != STATE_STOP && playing) return;
 		} else {
-			if (state != STATE_STOP) {
+			if (state != STATE_STOP && playing) {
 				if (parsing && state < 8) goto readagain;
 				else goto cleanup;
 			}
 		}
 	}
 end:	// end of file reached or other reason to stop
-        // TODO reset the file instead of stopping, for keep_preload
-        if (keep_preload) {
-            rewindFile();
-        } else {
-            wavfile.close();
-#if defined(HAS_KINETIS_SDHC)	
-            if (!(SIM_SCGC3 & SIM_SCGC3_SDHC)) AudioStopUsingSPI();
-#else 	
-            AudioStopUsingSPI();
-#endif	
-            state_play = STATE_STOP;
+        cleanupFile();
+        playing = false;
+        if (!keep_preload) {
             state = STATE_STOP;
         }
 cleanup:
@@ -433,7 +432,7 @@ start:
 
 	  // playing mono at native sample rate
 	  case STATE_DIRECT_16BIT_MONO:
-                if (pause) { return false; }
+                if (!playing) { return false; }
 		if (size > data_length) size = data_length;
 		data_length -= size;
 		while (1) {
@@ -449,10 +448,9 @@ start:
 				data_length += size;
 				buffer_offset = p - buffer;
 				if (block_right) release(block_right);
-                                // TODO reset the file instead of stopping, for keep_preload
 				if (data_length == 0) {
                                     if (keep_preload) {
-                                        rewindFile();
+                                        playing = false;
                                     } else {
                                         state = STATE_STOP;
                                     }
@@ -469,9 +467,8 @@ start:
 		if (block_offset > 0) {
 			// TODO: fill remainder of last block with zero and transmit
 		}
-                // TODO reset the file instead of stopping, for keep_preload
                 if (keep_preload) {
-                    rewindFile();
+                    playing = false;
                 } else {
                     state = STATE_STOP;
                 }
@@ -479,7 +476,7 @@ start:
 
 	  // playing stereo at native sample rate
 	  case STATE_DIRECT_16BIT_STEREO:
-                if (pause) { return false; }
+                if (!playing) { return false; }
 		if (size > data_length) size = data_length;
 		data_length -= size;
 		if (leftover_bytes) {
@@ -513,10 +510,9 @@ start:
 				block_right = NULL;
 				data_length += size;
 				buffer_offset = p - buffer;
-                                // TODO reset the file instead of stopping, for keep_preload
 				if (data_length == 0) {
                                     if (keep_preload) {
-                                        rewindFile();
+                                        playing = false;
                                     } else {
                                         state = STATE_STOP;
                                     }
@@ -533,9 +529,8 @@ start:
 		if (block_offset > 0) {
 			// TODO: fill remainder of last block with zero and transmit
 		}
-                // TODO reset the file instead of stopping, for keep_preload
                 if (keep_preload) {
-                    rewindFile();
+                    playing = false;
                 } else {
                     state = STATE_STOP;
                 }
@@ -566,11 +561,9 @@ start:
 	  //default:
 		//Serial.println("AudioPlaySdWav, unknown state");
 	}
-        // TODO reset the file instead of stopping, for keep_preload
         if (keep_preload) {
-            rewindFile();
+            playing = false;
         } else {
-            state_play = STATE_STOP;
             state = STATE_STOP;
         }
 	return false;
@@ -668,14 +661,14 @@ bool AudioPlaySdWav::parse_format(void)
 bool AudioPlaySdWav::isPlaying(void)
 {
 	uint8_t s = *(volatile uint8_t *)&state;
-	return (s < 8) && !pause;
+	return (s < 8) && playing;
 }
 
 
 bool AudioPlaySdWav::isPaused(void)
 {
 	uint8_t s = *(volatile uint8_t *)&state;
-	return (s < 8) && pause;
+	return (s < 8) && !playing;
 }
 
 bool AudioPlaySdWav::isLoading(void)
