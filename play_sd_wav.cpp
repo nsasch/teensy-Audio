@@ -665,6 +665,13 @@ bool AudioPlaySdWav::isPlaying(void)
 }
 
 
+bool AudioPlaySdWav::isPreloaded()
+{
+    uint8_t s = *(volatile uint8_t *)&state;
+    return ((s < 8) && !playing);
+}
+
+
 bool AudioPlaySdWav::isLoading(void)
 {
 	uint8_t s = *(volatile uint8_t *)&state;
