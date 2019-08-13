@@ -65,6 +65,14 @@ void AudioPlaySdWav::begin(void)
 bool AudioPlaySdWav::loadFile(const char *filename)
 {
 	stop();
+        if (keep_preload) {
+            wavfile.close();
+            #if defined(HAS_KINETIS_SDHC)	
+                    if (!(SIM_SCGC3 & SIM_SCGC3_SDHC)) AudioStopUsingSPI();
+            #else 	
+                    AudioStopUsingSPI();
+            #endif			
+        }
 #if defined(HAS_KINETIS_SDHC)	
 	if (!(SIM_SCGC3 & SIM_SCGC3_SDHC)) AudioStartUsingSPI();
 #else 	
@@ -118,9 +126,26 @@ bool AudioPlaySdWav::play()
     return true;
 }
 
+bool AudioPlaySdWav::rewindFile() {
+    __disable_irq();
+    pause = true;
+    __enable_irq();
+    uint32_t tlength = *(volatile uint32_t *)&total_length;
+    if (!wavfile.seek(wavfile.size() - tlength)) {
+        return false;
+    }
+    data_length = tlength;
+    buffer_length = 0;
+    buffer_offset = 0;
+    return true;
+}
+
 void AudioPlaySdWav::stop(void)
 {
     // TODO reset the file instead of stopping, for keep_preload
+    if (keep_preload) {
+        rewindFile();
+    } else {
 	__disable_irq();
 	if (state != STATE_STOP) {
 		audio_block_t *b1 = block_left;
@@ -140,6 +165,7 @@ void AudioPlaySdWav::stop(void)
 	} else {
 		__enable_irq();
 	}
+    }
 }
 
 
@@ -202,14 +228,18 @@ void AudioPlaySdWav::update(void)
 	}
 end:	// end of file reached or other reason to stop
         // TODO reset the file instead of stopping, for keep_preload
-	wavfile.close();
+        if (keep_preload) {
+            rewindFile();
+        } else {
+            wavfile.close();
 #if defined(HAS_KINETIS_SDHC)	
-	if (!(SIM_SCGC3 & SIM_SCGC3_SDHC)) AudioStopUsingSPI();
+            if (!(SIM_SCGC3 & SIM_SCGC3_SDHC)) AudioStopUsingSPI();
 #else 	
-	AudioStopUsingSPI();
+            AudioStopUsingSPI();
 #endif	
-	state_play = STATE_STOP;
-	state = STATE_STOP;
+            state_play = STATE_STOP;
+            state = STATE_STOP;
+        }
 cleanup:
 	if (block_left) {
 		if (block_offset > 0) {
@@ -420,7 +450,13 @@ start:
 				buffer_offset = p - buffer;
 				if (block_right) release(block_right);
                                 // TODO reset the file instead of stopping, for keep_preload
-				if (data_length == 0) state = STATE_STOP;
+				if (data_length == 0) {
+                                    if (keep_preload) {
+                                        rewindFile();
+                                    } else {
+                                        state = STATE_STOP;
+                                    }
+                                }
 				return true;
 			}
 			if (size == 0) {
@@ -434,7 +470,11 @@ start:
 			// TODO: fill remainder of last block with zero and transmit
 		}
                 // TODO reset the file instead of stopping, for keep_preload
-		state = STATE_STOP;
+                if (keep_preload) {
+                    rewindFile();
+                } else {
+                    state = STATE_STOP;
+                }
 		return false;
 
 	  // playing stereo at native sample rate
@@ -474,7 +514,13 @@ start:
 				data_length += size;
 				buffer_offset = p - buffer;
                                 // TODO reset the file instead of stopping, for keep_preload
-				if (data_length == 0) state = STATE_STOP;
+				if (data_length == 0) {
+                                    if (keep_preload) {
+                                        rewindFile();
+                                    } else {
+                                        state = STATE_STOP;
+                                    }
+                                }
 				return true;
 			}
 			if (size == 0) {
@@ -488,7 +534,11 @@ start:
 			// TODO: fill remainder of last block with zero and transmit
 		}
                 // TODO reset the file instead of stopping, for keep_preload
-		state = STATE_STOP;
+                if (keep_preload) {
+                    rewindFile();
+                } else {
+                    state = STATE_STOP;
+                }
 		return false;
 
 	  // playing mono, converting sample rate
@@ -517,8 +567,12 @@ start:
 		//Serial.println("AudioPlaySdWav, unknown state");
 	}
         // TODO reset the file instead of stopping, for keep_preload
-	state_play = STATE_STOP;
-	state = STATE_STOP;
+        if (keep_preload) {
+            rewindFile();
+        } else {
+            state_play = STATE_STOP;
+            state = STATE_STOP;
+        }
 	return false;
 }
 
