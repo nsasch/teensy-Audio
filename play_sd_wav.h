@@ -42,7 +42,6 @@ public:
 	bool play(void);
 	void stop(void);
 	bool isPlaying(void);
-        bool isPaused(void);
         bool isLoading(void);
         bool isStopped(void);
 	uint32_t positionMillis(void);
