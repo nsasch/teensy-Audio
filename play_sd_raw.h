@@ -55,7 +55,9 @@ private:
 	volatile uint32_t file_offset;
 	volatile bool playing;
         bool keep_preload;
+        bool buffered;
         elapsedMillis time_since_stopped_ms;
+        alignas(4) uint8_t buffer[AUDIO_BLOCK_SAMPLES*2*2];
 };
 
 #endif
