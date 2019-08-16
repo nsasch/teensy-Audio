@@ -36,6 +36,7 @@ void AudioPlaySdRaw::begin(void)
         keep_preload = false;
 	file_offset = 0;
 	file_size = 0;
+        time_since_stopped_ms = 0;
 }
 
 
@@ -45,6 +46,7 @@ bool AudioPlaySdRaw::preload(const char *filename, const bool keep_preload) {
     }
     this->keep_preload = keep_preload;
     playing = false;
+    time_since_stopped_ms = 0;
     return true;
 }
 
@@ -125,6 +127,7 @@ void AudioPlaySdRaw::stop()
 	if (playing) {
 		playing = false;
 		__enable_irq();
+                time_since_stopped_ms = 0;
                 cleanupFile();
 	} else {
 		__enable_irq();
@@ -154,6 +157,7 @@ void AudioPlaySdRaw::update(void)
 	} else {
             cleanupFile();
             playing = false;
+            time_since_stopped_ms = 0;
 	}
 	release(block);
 }

@@ -42,6 +42,8 @@ public:
 	void stop();
 	bool isPlaying(void) { return playing; }
 	bool isStopped(void) { return !playing; }
+        uint32_t getTimeSinceStoppedMs(void) { return time_since_stopped_ms; }
+        bool isStoppedForAtLeastMs(uint32_t t) { return isStopped() && time_since_stopped_ms > t; }
 	uint32_t positionMillis(void);
 	uint32_t lengthMillis(void);
 	virtual void update(void);
@@ -53,6 +55,7 @@ private:
 	volatile uint32_t file_offset;
 	volatile bool playing;
         bool keep_preload;
+        elapsedMillis time_since_stopped_ms;
 };
 
 #endif
