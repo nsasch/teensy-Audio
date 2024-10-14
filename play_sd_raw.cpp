@@ -36,8 +36,6 @@ void AudioPlaySdRaw::begin(void)
 	file_offset = 0;
 	file_size = 0;
         time_since_stopped_ms = 0;
-        buffer_len = 0;
-        buffer_offset = 0;
 }
 
 
@@ -61,8 +59,6 @@ void AudioPlaySdRaw::cleanupFile(bool force_cleanup) {
             return;
         }
         file_offset = 0;
-        buffer_len = 0;
-        buffer_offset = 0;
     } else {
         keep_preload = false;
         if (rawfile) {
@@ -98,28 +94,25 @@ bool AudioPlaySdRaw::loadFile(const char *filename) {
 	}
 	file_size = rawfile.size();
 	file_offset = 0;
-        buffer_len = 0;
-        buffer_offset = 0;
 	//Serial.println("able to open file");
 	return true;
 }
 
-bool AudioPlaySdRaw::play(const char *filename, bool half_sample)
+bool AudioPlaySdRaw::play(const char *filename)
 {
     if (!loadFile(filename)) {
         return false;
     }
 
-    return play(half_sample);
+    return play();
 }
 
-bool AudioPlaySdRaw::play(bool half_sample)
+bool AudioPlaySdRaw::play()
 {
     if (!rawfile) {
         // a file must be preloaded
         return false;
     }
-    this->half_sample = half_sample;
     playing = true;
     return true;
 }
@@ -137,16 +130,6 @@ void AudioPlaySdRaw::stop()
 	}
 }
 
-void copy_half_speed(uint16_t *src, int16_t *dst, int16_t n) {
-    int16_t *end = &dst[AUDIO_BLOCK_SAMPLES];
-    do {
-        *dst = *src;
-        *(dst+1) = *src;
-        dst += 2;
-        src += 1;
-    } while (dst < end);
-}
-
 void AudioPlaySdRaw::update(void)
 {
 	unsigned int i, n;
@@ -159,32 +142,19 @@ void AudioPlaySdRaw::update(void)
 	block = allocate();
 	if (block == NULL) return;
 
-        if (buffer_offset >= buffer_len) {
-            if (rawfile.available()) {
-                    // we can read more data from the file...
-                    n = rawfile.read(buffer, 512);
-                    buffer_offset = 0;
-                    buffer_len = n / 2;
-                    file_offset += n;
-                    for (i=buffer_len; i < (512 / 2); i++) {
-                            buffer[i] = 0;
-                    }
-            } else {
-                cleanupFile();
-                playing = false;
-                time_since_stopped_ms = 0;
-            }
-        }
-        if (buffer_offset < buffer_len) {
-            if (half_sample) {
-                copy_half_speed(buffer + buffer_offset, block->data, AUDIO_BLOCK_SAMPLES);
-                buffer_offset += AUDIO_BLOCK_SAMPLES / 2;
-            } else {
-                memcpy(block->data, buffer + buffer_offset, AUDIO_BLOCK_SAMPLES*2);
-                buffer_offset += AUDIO_BLOCK_SAMPLES;
-            }
-            transmit(block);
-        }
+	if (rawfile.available()) {
+		// we can read more data from the file...
+		n = rawfile.read(block->data, AUDIO_BLOCK_SAMPLES*2);
+		file_offset += n;
+		for (i=n/2; i < AUDIO_BLOCK_SAMPLES; i++) {
+			block->data[i] = 0;
+		}
+		transmit(block);
+	} else {
+		cleanupFile();
+		playing = false;
+		time_since_stopped_ms = 0;
+	}
 	release(block);
 }
 

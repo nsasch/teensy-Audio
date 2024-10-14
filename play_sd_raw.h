@@ -37,8 +37,8 @@ public:
 	AudioPlaySdRaw(void) : AudioStream(0, NULL) { begin(); }
 	void begin(void);
 	bool preload(const char *filename, const bool keep_preload);
-	bool play(const char *filename, bool half_sample=false);
-        bool play(bool half_sample=false);
+	bool play(const char *filename);
+        bool play();
 	void stop();
 	bool isPlaying(void) { return playing; }
 	bool isStopped(void) { return !playing; }
@@ -55,11 +55,8 @@ private:
 	volatile uint32_t file_offset;
 	volatile bool playing;
         bool keep_preload;
-        bool half_sample;
         elapsedMillis time_since_stopped_ms;
         alignas(4) uint16_t buffer[512 / 2];
-        uint16_t buffer_offset;
-        uint16_t buffer_len;
 };
 
 #endif
