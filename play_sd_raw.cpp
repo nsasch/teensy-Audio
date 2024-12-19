@@ -29,15 +29,22 @@
 #include "spi_interrupt.h"
 
 
+#define STATE_PLAYING			0
+#define STATE_PAUSED			1
+#define STATE_STOP			2
+
+#define B2M (uint32_t)((double)4294967296000.0 / AUDIO_SAMPLE_RATE_EXACT / 2.0) // 97352592
+
 void AudioPlaySdRaw::begin(void)
 {
-	playing = false;
+	state = STATE_STOP;
 	file_offset = 0;
 	file_size = 0;
+	loop = false;
 }
 
 
-bool AudioPlaySdRaw::play(const char *filename)
+bool AudioPlaySdRaw::play(const char *filename, bool shouldLoop)
 {
 	stop();
 	bool irq = false;
@@ -61,12 +68,33 @@ bool AudioPlaySdRaw::play(const char *filename)
 		if (irq) NVIC_ENABLE_IRQ(IRQ_SOFTWARE);
 		return false;
 	}
-	if (irq) NVIC_ENABLE_IRQ(IRQ_SOFTWARE);
 	file_size = rawfile.size();
 	file_offset = 0;
+	loop = shouldLoop;
 	//Serial.println("able to open file");
-	playing = true;
+	state = STATE_PLAYING;
+	if (irq) NVIC_ENABLE_IRQ(IRQ_SOFTWARE);
 	return true;
+}
+
+void AudioPlaySdRaw::resume(void) {
+	if (state == STATE_PAUSED) state = STATE_PLAYING;
+}
+
+void AudioPlaySdRaw::pause(void) {
+	if (state == STATE_PLAYING) state = STATE_PAUSED;
+}
+
+void AudioPlaySdRaw::togglePlayPause(void) {
+	if (state == STATE_STOP) return;
+
+	// toggle back and forth between STATE_PLAYING and STATE_PAUSED
+	if(state == STATE_PLAYING) {
+		state = STATE_PAUSED;
+	}
+	else if(state == STATE_PAUSED) {
+		state = STATE_PLAYING;
+	}
 }
 
 void AudioPlaySdRaw::stop(void)
@@ -76,8 +104,8 @@ void AudioPlaySdRaw::stop(void)
 		NVIC_DISABLE_IRQ(IRQ_SOFTWARE);
 		irq = true;
 	}
-	if (playing) {
-		playing = false;
+	if (state != STATE_STOP) {
+		state = STATE_STOP;
 		rawfile.close();
 		#if defined(HAS_KINETIS_SDHC)
 			if (!(SIM_SCGC3 & SIM_SCGC3_SDHC)) AudioStopUsingSPI();
@@ -88,13 +116,41 @@ void AudioPlaySdRaw::stop(void)
 	if (irq) NVIC_ENABLE_IRQ(IRQ_SOFTWARE);
 }
 
+void AudioPlaySdRaw::seek(uint32_t position_millis) {
+	file_offset = ((uint64_t)position_millis * B2M) >> 32;
+	bool irq = false;
+	if (NVIC_IS_ENABLED(IRQ_SOFTWARE)) {
+		NVIC_DISABLE_IRQ(IRQ_SOFTWARE);
+		irq = true;
+	}
+	rawfile.seek(file_offset);
+	if (irq) NVIC_ENABLE_IRQ(IRQ_SOFTWARE);
+}
+
+bool AudioPlaySdRaw::isPlaying(void)
+{
+	return (state == STATE_PLAYING);
+}
+
+
+bool AudioPlaySdRaw::isPaused(void)
+{
+	return (state == STATE_PAUSED);
+}
+
+
+bool AudioPlaySdRaw::isStopped(void)
+{
+	return (state == STATE_STOP);
+}
+
 void AudioPlaySdRaw::update(void)
 {
 	unsigned int i, n;
 	audio_block_t *block;
 
 	// only update if we're playing
-	if (!playing) return;
+	if (state != STATE_PLAYING) return;
 
 	// allocate the audio blocks to transmit
 	block = allocate();
@@ -108,6 +164,9 @@ void AudioPlaySdRaw::update(void)
 			block->data[i] = 0;
 		}
 		transmit(block);
+	} else if (loop) {
+		rawfile.seek(0);
+		file_offset = 0;
 	} else {
 		rawfile.close();
 		#if defined(HAS_KINETIS_SDHC)
@@ -115,12 +174,10 @@ void AudioPlaySdRaw::update(void)
 		#else
 			AudioStopUsingSPI();
 		#endif
-		playing = false;
+		state = STATE_STOP;
 	}
 	release(block);
 }
-
-#define B2M (uint32_t)((double)4294967296000.0 / AUDIO_SAMPLE_RATE_EXACT / 2.0) // 97352592
 
 uint32_t AudioPlaySdRaw::positionMillis(void)
 {

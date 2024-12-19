@@ -36,17 +36,24 @@ class AudioPlaySdRaw : public AudioStream
 public:
 	AudioPlaySdRaw(void) : AudioStream(0, NULL) { begin(); }
 	void begin(void);
-	bool play(const char *filename);
+	bool play(const char *filename, bool shouldLoop=false);
+	void togglePlayPause(void);
+	void resume(void);
+	void pause(void);
 	void stop(void);
-	bool isPlaying(void) { return playing; }
+	void seek(uint32_t position_millis);
+	bool isPlaying(void);
+	bool isPaused(void);
+	bool isStopped(void);
 	uint32_t positionMillis(void);
 	uint32_t lengthMillis(void);
 	virtual void update(void);
 private:
 	File rawfile;
-	uint32_t file_size;
+	volatile uint32_t file_size;
 	volatile uint32_t file_offset;
-	volatile bool playing;
+	volatile uint8_t state;
+	bool loop;
 };
 
 #endif
